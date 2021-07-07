@@ -1,10 +1,10 @@
 # encrypt38/Cargo.toml
-# 20210706
+# 20210707
 # ceca69ec8e1bcad6c6d79e1dcf7214ff67766580a62b7d19a6fb094c97b4f2dc
 
 [package]
 name = "encrypt38"
-version = "1.0.0"
+version = "1.0.1"
 authors = ["ceca69ec8e1bcad6c6d79e1dcf7214ff67766580a62b7d19a6fb094c97b4f2dc"]
 edition = "2018"
 include = [
@@ -13,8 +13,8 @@ include = [
 	"README.md"
 ]
 description = "Implementation of bip-0038 for use on command line interface."
-documentation = "https://github.com/ceca69ec/encrypt38"
-homepage = "https://github.com/ceca69ec/encrypt38"
+documentation = "https://docs.rs/encrypt38"
+homepage = "https://crates.io/crates/encrypt38"
 repository = "https://github.com/ceca69ec/encrypt38"
 keywords = [
 	"bip-0038",

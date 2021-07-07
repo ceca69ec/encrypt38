@@ -8,9 +8,9 @@ encrypt38
 * **Don't trust, verify**
     - Compare the results of this tool with others. Verify the implementation (and the tests). Decrypt immediately after an encryption to check the passphrase you *typed* was the one you *wanted*. **Use at your won risk.**
 * **Not recommended**
-    - Use this tool only to decrypt keys you already have. The method of keeping private keys encrypted with bip-0038 standard is [not recommended](https://youtu.be/MbwLVok4gWA?t=2462) anymore (use [mnemonic](https://github.com/ceca69ec/mnemonic39) instead).
+    - Use this tool only to decrypt keys you already have. The method of keeping private keys encrypted with bip-0038 standard is [not recommended](https://youtu.be/MbwLVok4gWA?t=2462) anymore (use [mnemonic](https://crates.io/crates/mnemonic39) instead).
 * **Pseudo-random number generation**
-    - This tool use pseudo-random generation ([rand](https://github.com/rust-random/rand)) when encrypting using elliptic curve multiplication method (as specified in  bip-0038).
+    - This tool use pseudo-random generation ([rand](https://crates.io/crates/rand)) when encrypting using elliptic curve multiplication method (as specified in bip-0038).
 
 ## Features
 
