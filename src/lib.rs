@@ -1,7 +1,3 @@
-// encrypt38/src/lib.rs
-// 20210706
-// ceca69ec8e1bcad6c6d79e1dcf7214ff67766580a62b7d19a6fb094c97b4f2dc
-
 /// Library of the 'encrypt38' project.
 
 use aes::Aes256;
@@ -12,6 +8,7 @@ use aes::cipher::{
     NewBlockCipher
 };
 use bech32::ToBase32;
+use bip38::Encrypt;
 use clap::{App, Arg, ArgMatches, crate_version};
 use rand::RngCore;
 use ripemd160::Ripemd160;
@@ -119,7 +116,7 @@ pub enum Error {
 }
 
 /// Functions to manipulate data in form of arbitrary number of bytes [u8].
-pub trait BytesManipulation {
+trait BytesManipulation {
     /// Encode informed data in base 58 check.
     fn encode_base58ck(&self) -> String;
 
@@ -137,14 +134,7 @@ pub trait BytesManipulation {
 }
 
 /// Functions to manipulate private keys (32 bytes).
-pub trait PrivateKeyManipulation {
-    /// Encrypt private key.
-    fn encrypt(
-        &self,
-        pass: &str,
-        compress: bool
-    ) -> Result<(String, Vec<u8>), Error>;
-
+trait PrivateKeyManipulation {
     /// Generate secp256k1 point based on target secret key.
     fn public(&self, compress: bool) -> Result<Vec<u8>, Error>;
 
@@ -153,7 +143,7 @@ pub trait PrivateKeyManipulation {
 }
 
 /// Functions to manipulate compressed public keys (33 bytes).
-pub trait PublicKeyCompressedManipulation {
+trait PublicKeyCompressedManipulation {
     /// Generate an segwit address of a compressed public key.
     fn segwit_p2wpkh(&self) -> Result<String, Error>;
 
@@ -162,7 +152,7 @@ pub trait PublicKeyCompressedManipulation {
 }
 
 /// Functions to manipulate strings.
-pub trait StringManipulation {
+trait StringManipulation {
     /// Decode informed base 58 string into bytes (payload only).
     fn decode_base58ck(&self) -> Result<Vec<u8>, Error>;
 
@@ -188,12 +178,7 @@ pub trait StringManipulation {
     fn show_decrypt(&self, pass: &str, separator: &str) -> Result<(), Error>;
 
     /// Show encryption of target string in command line interface.
-    fn show_encrypt(
-        &self,
-        pass: &str,
-        compress: bool,
-        separator: &str
-    ) -> Result<(), Error>;
+    fn show_encrypt(&self, pass: &str, compress: bool) -> Result<(), Error>;
 }
 
 /// Implementation of enum Error.
@@ -272,49 +257,6 @@ impl BytesManipulation for [u8] {
 
 /// Implementation of trait PrivateKeyManipulation.
 impl PrivateKeyManipulation for [u8; 32] {
-    #[inline]
-    fn encrypt(
-        &self,
-        pass: &str,
-        compress: bool
-    ) -> Result<(String, Vec<u8>), Error> {
-        let pubk = self.public(compress)?;
-        let address = pubk.p2wpkh()?;
-        let checksum = &address.as_bytes().hash256()[..4];
-        let mut scrypt_key = [0x00; 64];
-
-        scrypt::scrypt(
-            pass.nfc().collect::<String>().as_bytes(),
-            checksum,
-            &Params::new(14, 8, 8).map_err(|_| Error::ScryptP)?,
-            &mut scrypt_key
-        ).map_err(|_| Error::ScryptF)?;
-
-        let mut half1 = [0x00; 32];
-        half1[..].copy_from_slice(&scrypt_key[..32]);
-
-        let cipher = Aes256::new(GenericArray::from_slice(&scrypt_key[32..]));
-
-        for idx in 0..32 {
-            half1[idx] ^= self[idx];
-        }
-
-        let mut part1 = GenericArray::clone_from_slice(&half1[..16]);
-        let mut part2 = GenericArray::clone_from_slice(&half1[16..]);
-
-        cipher.encrypt_block(&mut part1);
-        cipher.encrypt_block(&mut part2);
-
-        let mut buffer = [0x00; 39];
-        buffer[..2].copy_from_slice(&PRE_NON_EC);
-        buffer[2] = if compress { 0xe0 } else { 0xc0 };
-        buffer[3..7].copy_from_slice(checksum);
-        buffer[7..23].copy_from_slice(&part1);
-        buffer[23..].copy_from_slice(&part2);
-
-        Ok((buffer.encode_base58ck(), pubk))
-    }
-
     #[inline]
     fn public(&self, compress: bool) -> Result<Vec<u8>, Error> {
         let secp_pub = PublicKey::from_secret_key(
@@ -701,82 +643,30 @@ impl StringManipulation for str {
     }
 
     #[inline]
-    fn show_encrypt(
-        &self,
-        pass: &str,
-        compress: bool,
-        separator: &str
-    ) -> Result<(), Error> {
-        let (eprvk, pubk) = if self.is_empty() {
-            pass.encrypt_ec(compress)?
+    fn show_encrypt(&self, pass: &str, compress: bool) -> Result<(), Error> {
+        let eprvk = if self.is_empty() {
+            pass.encrypt_ec(compress)?.0
         } else if self.is_char_boundary(1) && (PRE_WIF_C.contains(&self[..1])
             || self.starts_with(PRE_WIF_U)) {
             if self.len() == LEN_WIF_C || self.len() == LEN_WIF_U {
                 if !compress { return Err(Error::FlagU); }
                 let (prvk, compress) = self.decode_wif()?;
-                prvk.encrypt(pass, compress)?
-            } else { return Err(Error::WifKey); }
+                prvk.encrypt(pass, compress).unwrap() // FIXME
+            } else {
+                return Err(Error::WifKey);
+            }
         } else if self.is_hex() {
             if self.len() == 64 {
                 let mut prvk = [0x00; 32];
                 prvk[..].copy_from_slice(&self.hex_bytes()?);
-                prvk.encrypt(pass, compress)?
-            } else { return Err(Error::HexKey); }
-        } else { return Err(Error::InvArg); };
-
-        if pubk.len() == NBBY_PUBC {
-            let mut pubk_c = [0x00; NBBY_PUBC];
-            pubk_c[..].copy_from_slice(&pubk);
-            let pubk_hex = pubk_c.hex_string();
-            if separator == SEP_DEFAULT {
-                println!(
-                    "{:42}{}{}{}{}\n{:42}{}{}{}{}\n{}{}{}{}{}",
-                    pubk_c.p2wpkh()?,
-                    separator,
-                    pubk_hex,
-                    separator,
-                    eprvk,
-                    pubk_c.segwit_p2wpkh_p2sh()?,
-                    separator,
-                    pubk_hex,
-                    separator,
-                    eprvk,
-                    pubk_c.segwit_p2wpkh()?,
-                    separator,
-                    pubk_hex,
-                    separator,
-                    eprvk,
-                );
+                prvk.encrypt(pass, compress).unwrap() // FIXME
             } else {
-                println!(
-                    "{}{}{}{}{}\n{}{}{}{}{}\n{}{}{}{}{}",
-                    pubk_c.p2wpkh()?,
-                    separator,
-                    pubk_hex,
-                    separator,
-                    eprvk,
-                    pubk_c.segwit_p2wpkh_p2sh()?,
-                    separator,
-                    pubk_hex,
-                    separator,
-                    eprvk,
-                    pubk_c.segwit_p2wpkh()?,
-                    separator,
-                    pubk_hex,
-                    separator,
-                    eprvk,
-                );
+                return Err(Error::HexKey);
             }
         } else {
-            println!(
-                "{}{}{}{}{}",
-                pubk.p2wpkh()?,
-                separator,
-                pubk.hex_string(),
-                separator,
-                eprvk
-            );
-        }
+            return Err(Error::InvArg);
+        };
+        println!("{}", eprvk);
         Ok(())
     }
 }
@@ -793,7 +683,8 @@ pub fn handle_arguments(matches: ArgMatches) -> Result<(), Error> {
     } else if prv.starts_with(PRE_EKEY) {
         prv.show_decrypt(pass, separator)?;
     } else {
-        prv.show_encrypt(pass, compress, separator)?;
+        if separator != SEP_DEFAULT { return Err(Error::FlagU); } // FIXME
+        prv.show_encrypt(pass, compress)?;
     }
     Ok(())
 }
@@ -1118,10 +1009,7 @@ mod tests {
         let mut compress = false;
         for (idx, key) in TV_38_KEY[..5].iter().enumerate() {
             if idx > 2 { compress = true }
-            assert_eq!(
-                key.encrypt(TV_38_PASS[idx], compress).unwrap().0,
-                TV_38_ENCRYPTED[idx]
-            );
+            assert_eq!(key.encrypt(TV_38_PASS[idx], compress).unwrap(), TV_38_ENCRYPTED[idx]);
         }
     }
 
@@ -1298,10 +1186,10 @@ mod tests {
     #[test]
     fn test_show_encrypt() {
         assert_eq!(
-            TV_38_WIF[0].show_encrypt("pass", false, SEP_DEFAULT).unwrap_err(),
+            TV_38_WIF[0].show_encrypt("pass", false).unwrap_err(),
             Error::FlagU
         );
-        assert!(TV_38_WIF[1].show_encrypt("pass", true, SEP_DEFAULT).is_ok());
+        assert!(TV_38_WIF[1].show_encrypt("pass", true).is_ok());
     }
 
     #[test]
