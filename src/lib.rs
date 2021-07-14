@@ -1,6 +1,49 @@
-/// Library of the 'encrypt38' project.
+//! **Implementation of [bip-0038](https://github.com/bitcoin/bips/blob/master/bip-0038.mediawiki)
+//! in rust for use on command line interface.**
+//! 
+//! ## Disclaimer
+//! 
+//! * **Don't trust, verify**
+//!     - Compare the results of this tool with others. Verify the implementation (and the tests).
+//! Decrypt immediately after an encryption to check the passphrase you *typed* was the one you
+//! *wanted*. **Use at your won risk.**
+//! * **Not recommended**
+//!     - Use this tool only to decrypt keys you already have. The method of keeping private keys
+//! encrypted with bip-0038 standard is [not recommended](https://youtu.be/MbwLVok4gWA?t=2462)
+//! anymore (use [mnemonic](https://crates.io/crates/mnemonic39) instead).
+//! * **Pseudo-random number generation**
+//!     - This tool use pseudo-random generation ([rand](https://crates.io/crates/rand)) when
+//! encrypting using elliptic curve multiplication method (as specified in bip-0038).
+//! 
+//! ## Features
+//! 
+//! * **Address**
+//!     - This tool show the respective address of a decrypted private key in the legacy,
+//! segwit-nested and segwit-native formats according to the version prefix of the encrypted
+//! private key.
+//! * **Custom separator**
+//!     - Customization of the default separator of information on result.
+//! * **Decryption**
+//!     - Insert an encrypted private key `6P...` and passphrase do show the private key
+//! represented in hexadecimal and the respective address and wif keys.
+//! * **Encryption**
+//!     - Insert a private key in the form of hexadecimal numbers or wif key and passphrase to show
+//! the encrypted private key.
+//! * **Encryption (using elliptic curve multiplication)**
+//!     - Insert a passphrase to generate an encrypted private key using pseudo-random number
+//! generation and elliptic curve multiplication (*not recommended*).
+//! * **Uncompressed address**
+//!     - This tool is capable of resulting in uncompressed address (mainly for decryption and
+//! retro compatibility, *not recommended*).
+//! 
+//! ## Recommendation
+//! 
+//! * **Build and test**
+//!     - Always use the flag `--release` in `cargo` even for running tests. The encryption
+//! algorithm is intended to be heavy on cpu so, without the optimizations of a release build,
+//! running the tests will be a slow process. With `--release` all tests are done in seconds.
 
-// TODO: main documentation
+// TODO: usage examples
 
 use bech32::ToBase32;
 use bip38::{Encrypt, Decrypt, Generate};
@@ -68,6 +111,7 @@ const SEP_DEFAULT: &str = " | ";
 
 /// Errors of 'encrypt38' project.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd)]
+#[doc(hidden)]
 pub enum Error {
     /// If an invalid base 58 string is processed.
     Base58,
@@ -101,16 +145,16 @@ pub enum Error {
 
 /// Functions to manipulate data in form of arbitrary number of bytes [u8].
 trait BytesManipulation {
-    /// Encode informed data in base 58 check.
+    /// Encode target arbitrary number of bytes in base 58 check.
     fn encode_base58ck(&self) -> String;
 
     /// Sha256 and ripemd160 in sequence.
     fn hash160(&self) -> [u8; 20];
 
-    /// Receives a string and return 32 bytes of a dual sha256 hash.
+    /// Receives a arbitrary number of bytes and return 32 bytes of a dual sha256 hash of them.
     fn hash256(&self) -> [u8; 32];
 
-    /// Receives bytes and return string of hexadecimal characters.
+    /// Receives bytes and return a string of hexadecimal characters.
     fn hex_string(&self) -> String;
 
     /// Create an p2wpkh address according to inserted self key bytes.
@@ -195,18 +239,14 @@ impl BytesManipulation for [u8] {
     #[inline]
     fn hash160(&self) -> [u8; 20] {
         let mut result = [0x00; 20];
-        result[..].copy_from_slice(
-            &Ripemd160::digest(&sha2::Sha256::digest(self))
-        );
+        result[..].copy_from_slice(&Ripemd160::digest(&sha2::Sha256::digest(self)));
         result
     }
 
     #[inline]
     fn hash256(&self) -> [u8; 32] {
         let mut result = [0x00; 32];
-        result[..].copy_from_slice(
-            &sha2::Sha256::digest(&sha2::Sha256::digest(self))
-        );
+        result[..].copy_from_slice(&sha2::Sha256::digest(&sha2::Sha256::digest(self)));
         result
     }
 
@@ -221,9 +261,7 @@ impl BytesManipulation for [u8] {
 
     #[inline]
     fn p2wpkh(&self) -> Result<String, Error> {
-        if self.len() != NBBY_PUBC && self.len() != NBBY_PUBU {
-            return Err(Error::NbPubB);
-        }
+        if self.len() != NBBY_PUBC && self.len() != NBBY_PUBU { return Err(Error::NbPubB); }
         let mut address_bytes = vec![0x00];
         address_bytes.append(&mut self.hash160().to_vec());
         Ok(address_bytes.encode_base58ck())
@@ -238,7 +276,6 @@ impl PrivateKeyManipulation for [u8; 32] {
             &Secp256k1::new(),
             &SecretKey::from_slice(self).map_err(|_| Error::SecEnt)?
         );
-
         if compress {
             Ok(secp_pub.serialize().to_vec())
         } else {
@@ -260,9 +297,7 @@ impl PublicKeyCompressedManipulation for [u8; NBBY_PUBC] {
     #[inline]
     fn segwit_p2wpkh(&self) -> Result<String, Error> {
         // segwit version has to be inserted as 5 bit unsigned integer
-        let mut decoded_u5 = vec![
-            bech32::u5::try_from_u8(0).map_err(|_| Error::Bech32)?
-        ];
+        let mut decoded_u5 = vec![bech32::u5::try_from_u8(0).map_err(|_| Error::Bech32)?];
         decoded_u5.append(&mut self.hash160().to_base32());
         let encoded = bech32::encode("bc", decoded_u5, bech32::Variant::Bech32)
             .map_err(|_| Error::Bech32)?;
@@ -273,10 +308,8 @@ impl PublicKeyCompressedManipulation for [u8; NBBY_PUBC] {
     fn segwit_p2wpkh_p2sh(&self) -> Result<String, Error> {
         let mut redeem_script = vec![OP_0, OP_PUSH20];
         redeem_script.append(&mut self.hash160().to_vec());
-
         let mut address_bytes = vec![PRE_P2WPKH_P2SH_B];
         address_bytes.append(&mut redeem_script.hash160().to_vec());
-
         Ok(address_bytes.encode_base58ck())
     }
 }
@@ -288,26 +321,24 @@ impl StringManipulation for str {
         let raw = bs58::decode(self).into_vec().map_err(|_| Error::Base58)?;
         if raw[raw.len() - 4..] == raw[..raw.len() - 4].hash256()[..4] {
             Ok(raw[..(raw.len() - 4)].to_vec())
-        } else { Err(Error::Check) }
+        } else {
+            Err(Error::Check)
+        }
     }
 
     #[inline]
     fn decode_wif(&self) -> Result<([u8; 32], bool), Error> {
         if (!self.is_char_boundary(1) || !PRE_WIF_C.contains(&self[..1]) ||
-            self.len() != LEN_WIF_C) && (!self.starts_with(PRE_WIF_U) ||
-            self.len() != LEN_WIF_U) {
+            self.len() != LEN_WIF_C) && (!self.starts_with(PRE_WIF_U) || self.len() != LEN_WIF_U) {
             return Err(Error::WifKey);
         }
         let raw_bytes = self.decode_base58ck()?;
-
         if (raw_bytes.len() != NBBY_WIFC && raw_bytes.len() != NBBY_WIFU) ||
             raw_bytes[0] != PRE_WIF_B {
             return Err(Error::WifKey)
         }
-
         let mut result = [0x00; 32];
         result[..].copy_from_slice(&raw_bytes[1..33]);
-
         Ok((result, raw_bytes.len() == NBBY_WIFC))
     }
 
@@ -315,10 +346,7 @@ impl StringManipulation for str {
     fn hex_bytes(&self) -> Result<Vec<u8>, Error> {
         let mut out = Vec::new();
         for index in (0..self.len()).step_by(2) {
-            out.push(
-                u8::from_str_radix(&self[index..index + 2], 16)
-                .map_err(|_| Error::HexStr)?
-            );
+            out.push(u8::from_str_radix(&self[index..index + 2], 16).map_err(|_| Error::HexStr)?);
         }
         Ok(out)
     }
@@ -336,7 +364,7 @@ impl StringManipulation for str {
     #[inline]
     fn show_decrypt(&self, pass: &str, separator: &str) -> Result<(), Error> {
         let decoded = self.decode_base58ck()?;
-        let (prvk, compress) = if decoded[..2] == PRE_NON_EC || decoded[..2] == PRE_EC{
+        let (prvk, compress) = if decoded[..2] == PRE_NON_EC || decoded[..2] == PRE_EC {
             self.decrypt(pass)?
         } else {
             return Err(Error::EncKey);
@@ -406,8 +434,8 @@ impl StringManipulation for str {
     fn show_encrypt(&self, pass: &str, compress: bool) -> Result<(), Error> {
         let eprvk = if self.is_empty() {
             pass.generate(compress).map_err(|_| Error::Prvk)?
-        } else if self.is_char_boundary(1) && (PRE_WIF_C.contains(&self[..1])
-            || self.starts_with(PRE_WIF_U)) {
+        } else if self.is_char_boundary(1) &&
+            (PRE_WIF_C.contains(&self[..1]) || self.starts_with(PRE_WIF_U)) {
             if self.len() == LEN_WIF_C || self.len() == LEN_WIF_U {
                 if !compress { return Err(Error::FlagU); }
                 let (prvk, compress) = self.decode_wif()?;
@@ -432,6 +460,7 @@ impl StringManipulation for str {
 }
 
 /// Treat arguments informed by user and act accordingly.
+#[doc(hidden)]
 pub fn handle_arguments(matches: ArgMatches) -> Result<(), Error> {
     let compress = !matches.is_present("uncompressed");
     let separator = matches.value_of("separator").unwrap_or(SEP_DEFAULT);
@@ -454,6 +483,7 @@ pub fn handle_arguments(matches: ArgMatches) -> Result<(), Error> {
 }
 
 /// Create the default clap app for the project
+#[doc(hidden)]
 pub fn init_clap() -> App<'static, 'static> {
     App::new("encrypt38")
         .about(ABOUT)
@@ -501,15 +531,15 @@ mod tests {
 
     /// Bytes of a double sha256 digest of character 'a'.
     const A_2R: [u8; 32] = [
-        0xbf, 0x5d, 0x3a, 0xff, 0xb7, 0x3e, 0xfd, 0x2e, 0xc6, 0xc3, 0x6a, 0xd3,
-        0x11, 0x2d, 0xd9, 0x33, 0xef, 0xed, 0x63, 0xc4, 0xe1, 0xcb, 0xff, 0xcf,
-        0xa8, 0x8e, 0x27, 0x59, 0xc1, 0x44, 0xf2, 0xd8
+        0xbf, 0x5d, 0x3a, 0xff, 0xb7, 0x3e, 0xfd, 0x2e, 0xc6, 0xc3, 0x6a, 0xd3, 0x11, 0x2d, 0xd9,
+        0x33, 0xef, 0xed, 0x63, 0xc4, 0xe1, 0xcb, 0xff, 0xcf, 0xa8, 0x8e, 0x27, 0x59, 0xc1, 0x44,
+        0xf2, 0xd8
     ];
 
     /// Bytes of a sha256 and ripemd160 of character 'a'.
     const A_H: [u8; 20] = [
-        0x99, 0x43, 0x55, 0x19, 0x9e, 0x51, 0x6f, 0xf7, 0x6c, 0x4f, 0xa4, 0xaa,
-        0xb3, 0x93, 0x37, 0xb9, 0xd8, 0x4c, 0xf1, 0x2b
+        0x99, 0x43, 0x55, 0x19, 0x9e, 0x51, 0x6f, 0xf7, 0x6c, 0x4f, 0xa4, 0xaa, 0xb3, 0x93, 0x37,
+        0xb9, 0xd8, 0x4c, 0xf1, 0x2b
     ];
 
     /// Compressed address with secret key of all bytes '0x11'
@@ -532,9 +562,9 @@ mod tests {
 
     /// 'Secret' entropy to generate address.
     const P2WPKH_B: [u8; 32] = [
-        0xa9, 0x66, 0xeb, 0x60, 0x58, 0xf8, 0xec, 0x9f, 0x47, 0x07, 0x4a, 0x2f,
-        0xaa, 0xdd, 0x3d, 0xab, 0x42, 0xe2, 0xc6, 0x0e, 0xd0, 0x5b, 0xc3, 0x4d,
-        0x39, 0xd6, 0xc0, 0xe1, 0xd3, 0x2b, 0x8b, 0xdf
+        0xa9, 0x66, 0xeb, 0x60, 0x58, 0xf8, 0xec, 0x9f, 0x47, 0x07, 0x4a, 0x2f, 0xaa, 0xdd, 0x3d,
+        0xab, 0x42, 0xe2, 0xc6, 0x0e, 0xd0, 0x5b, 0xc3, 0x4d, 0x39, 0xd6, 0xc0, 0xe1, 0xd3, 0x2b,
+        0x8b, 0xdf
     ];
 
     /// Segwit p2wpkh-p2sh address with all secret bytes '0x11'.
@@ -548,52 +578,49 @@ mod tests {
 
     /// Bytes of compressed public key generated with all bytes '0x11'.
     const PUB_C_1: [u8; NBBY_PUBC] = [
-        0x03, 0x4f, 0x35, 0x5b, 0xdc, 0xb7, 0xcc, 0x0a, 0xf7, 0x28, 0xef, 0x3c,
-        0xce, 0xb9, 0x61, 0x5d, 0x90, 0x68, 0x4b, 0xb5, 0xb2, 0xca, 0x5f, 0x85,
-        0x9a, 0xb0, 0xf0, 0xb7, 0x04, 0x07, 0x58, 0x71, 0xaa
+        0x03, 0x4f, 0x35, 0x5b, 0xdc, 0xb7, 0xcc, 0x0a, 0xf7, 0x28, 0xef, 0x3c, 0xce, 0xb9, 0x61,
+        0x5d, 0x90, 0x68, 0x4b, 0xb5, 0xb2, 0xca, 0x5f, 0x85, 0x9a, 0xb0, 0xf0, 0xb7, 0x04, 0x07,
+        0x58, 0x71, 0xaa
      ];
 
     /// Bytes of compressed public key generated with 'P2PKG_B' secret.
     const PUB_C_A: [u8; NBBY_PUBC] = [
-        0x02, 0x3c, 0xba, 0x1f, 0x4d, 0x12, 0xd1, 0xce, 0x0b, 0xce, 0xd7, 0x25,
-        0x37, 0x37, 0x69, 0xb2, 0x26, 0x2c, 0x6d, 0xaa, 0x97, 0xbe, 0x6a, 0x05,
-        0x88, 0xcf, 0xec, 0x8c, 0xe1, 0xa5, 0xf0, 0xbd, 0x09
+        0x02, 0x3c, 0xba, 0x1f, 0x4d, 0x12, 0xd1, 0xce, 0x0b, 0xce, 0xd7, 0x25, 0x37, 0x37, 0x69,
+        0xb2, 0x26, 0x2c, 0x6d, 0xaa, 0x97, 0xbe, 0x6a, 0x05, 0x88, 0xcf, 0xec, 0x8c, 0xe1, 0xa5,
+        0xf0, 0xbd, 0x09
     ];
 
     /// Bytes of compressed public key generated with all bytes '0x69'.
     const PUB_C_L: [u8; NBBY_PUBC] = [
-        0x02, 0x66, 0x6b, 0xdf, 0x20, 0x25, 0xe3, 0x2f, 0x41, 0x08, 0x88, 0x99,
-        0xf2, 0xbc, 0xb4, 0xbf, 0x69, 0x83, 0x18, 0x7f, 0x38, 0x0e, 0x72, 0xfc,
-        0x7d, 0xee, 0x11, 0x5b, 0x1f, 0x99, 0x57, 0xcc, 0x72
+        0x02, 0x66, 0x6b, 0xdf, 0x20, 0x25, 0xe3, 0x2f, 0x41, 0x08, 0x88, 0x99, 0xf2, 0xbc, 0xb4,
+        0xbf, 0x69, 0x83, 0x18, 0x7f, 0x38, 0x0e, 0x72, 0xfc, 0x7d, 0xee, 0x11, 0x5b, 0x1f, 0x99,
+        0x57, 0xcc, 0x72
      ];
 
     /// Bytes of uncompressed public key generated with all bytes '0x11'.
     const PUB_U_1: [u8; NBBY_PUBU] = [
-        0x04, 0x4f, 0x35, 0x5b, 0xdc, 0xb7, 0xcc, 0x0a, 0xf7, 0x28, 0xef, 0x3c,
-        0xce, 0xb9, 0x61, 0x5d, 0x90, 0x68, 0x4b, 0xb5, 0xb2, 0xca, 0x5f, 0x85,
-        0x9a, 0xb0, 0xf0, 0xb7, 0x04, 0x07, 0x58, 0x71, 0xaa, 0x38, 0x5b, 0x6b,
-        0x1b, 0x8e, 0xad, 0x80, 0x9c, 0xa6, 0x74, 0x54, 0xd9, 0x68, 0x3f, 0xcf,
-        0x2b, 0xa0, 0x34, 0x56, 0xd6, 0xfe, 0x2c, 0x4a, 0xbe, 0x2b, 0x07, 0xf0,
+        0x04, 0x4f, 0x35, 0x5b, 0xdc, 0xb7, 0xcc, 0x0a, 0xf7, 0x28, 0xef, 0x3c, 0xce, 0xb9, 0x61,
+        0x5d, 0x90, 0x68, 0x4b, 0xb5, 0xb2, 0xca, 0x5f, 0x85, 0x9a, 0xb0, 0xf0, 0xb7, 0x04, 0x07,
+        0x58, 0x71, 0xaa, 0x38, 0x5b, 0x6b, 0x1b, 0x8e, 0xad, 0x80, 0x9c, 0xa6, 0x74, 0x54, 0xd9,
+        0x68, 0x3f, 0xcf, 0x2b, 0xa0, 0x34, 0x56, 0xd6, 0xfe, 0x2c, 0x4a, 0xbe, 0x2b, 0x07, 0xf0,
         0xfb, 0xdb, 0xb2, 0xf1, 0xc1
      ];
 
     /// Bytes of uncompressed public key generated with 'P2PKG_B' secret.
     const PUB_U_A: [u8; NBBY_PUBU] = [
-        0x04, 0x3c, 0xba, 0x1f, 0x4d, 0x12, 0xd1, 0xce, 0x0b, 0xce, 0xd7, 0x25,
-        0x37, 0x37, 0x69, 0xb2, 0x26, 0x2c, 0x6d, 0xaa, 0x97, 0xbe, 0x6a, 0x05,
-        0x88, 0xcf, 0xec, 0x8c, 0xe1, 0xa5, 0xf0, 0xbd, 0x09, 0x2f, 0x56, 0xb5,
-        0x49, 0x2a, 0xdb, 0xfc, 0x57, 0x0b, 0x15, 0x64, 0x4c, 0x74, 0xcc, 0x8a,
-        0x48, 0x74, 0xed, 0x20, 0xdf, 0xe4, 0x7e, 0x5d, 0xce, 0x2e, 0x08, 0x60,
+        0x04, 0x3c, 0xba, 0x1f, 0x4d, 0x12, 0xd1, 0xce, 0x0b, 0xce, 0xd7, 0x25, 0x37, 0x37, 0x69,
+        0xb2, 0x26, 0x2c, 0x6d, 0xaa, 0x97, 0xbe, 0x6a, 0x05, 0x88, 0xcf, 0xec, 0x8c, 0xe1, 0xa5,
+        0xf0, 0xbd, 0x09, 0x2f, 0x56, 0xb5, 0x49, 0x2a, 0xdb, 0xfc, 0x57, 0x0b, 0x15, 0x64, 0x4c,
+        0x74, 0xcc, 0x8a, 0x48, 0x74, 0xed, 0x20, 0xdf, 0xe4, 0x7e, 0x5d, 0xce, 0x2e, 0x08, 0x60,
         0x1d, 0x6f, 0x11, 0xf5, 0xa4
     ];
 
     /// Bytes of uncompressed public key generated with all bytes '0x69'.
     const PUB_U_L: [u8; NBBY_PUBU] = [
-        0x04, 0x66, 0x6b, 0xdf, 0x20, 0x25, 0xe3, 0x2f, 0x41, 0x08, 0x88, 0x99,
-        0xf2, 0xbc, 0xb4, 0xbf, 0x69, 0x83, 0x18, 0x7f, 0x38, 0x0e, 0x72, 0xfc,
-        0x7d, 0xee, 0x11, 0x5b, 0x1f, 0x99, 0x57, 0xcc, 0x72, 0x9d, 0xd9, 0x76,
-        0x13, 0x1c, 0x4c, 0x8e, 0x12, 0xab, 0x10, 0x83, 0xca, 0x06, 0x54, 0xca,
-        0x5f, 0xdb, 0xca, 0xc8, 0xd3, 0x19, 0x8d, 0xaf, 0x90, 0xf5, 0x81, 0xb5,
+        0x04, 0x66, 0x6b, 0xdf, 0x20, 0x25, 0xe3, 0x2f, 0x41, 0x08, 0x88, 0x99, 0xf2, 0xbc, 0xb4,
+        0xbf, 0x69, 0x83, 0x18, 0x7f, 0x38, 0x0e, 0x72, 0xfc, 0x7d, 0xee, 0x11, 0x5b, 0x1f, 0x99,
+        0x57, 0xcc, 0x72, 0x9d, 0xd9, 0x76, 0x13, 0x1c, 0x4c, 0x8e, 0x12, 0xab, 0x10, 0x83, 0xca,
+        0x06, 0x54, 0xca, 0x5f, 0xdb, 0xca, 0xc8, 0xd3, 0x19, 0x8d, 0xaf, 0x90, 0xf5, 0x81, 0xb5,
         0x91, 0xd5, 0x63, 0x79, 0xca
      ];
 
@@ -621,9 +648,15 @@ mod tests {
 
     /// Passphrases acquired on test vectors of bip-0038.
     const TV_38_PASS: [&str; 9] = [
-        "TestingOneTwoThree", "Satoshi",
-        "\u{03d2}\u{0301}\u{0000}\u{010400}\u{01f4a9}", "TestingOneTwoThree",
-        "Satoshi", "TestingOneTwoThree", "Satoshi", "MOLON LABE", "ΜΟΛΩΝ ΛΑΒΕ"
+        "TestingOneTwoThree",
+        "Satoshi",
+        "\u{03d2}\u{0301}\u{0000}\u{010400}\u{01f4a9}",
+        "TestingOneTwoThree",
+        "Satoshi",
+        "TestingOneTwoThree",
+        "Satoshi",
+        "MOLON LABE",
+        "ΜΟΛΩΝ ΛΑΒΕ"
     ];
 
     /// First resulting wif key obtained in test vector of bip-0038.
@@ -669,21 +702,10 @@ mod tests {
         assert_eq!(WIC_L.decode_wif().unwrap(), ([0x69; 32], true));
         assert_eq!(WIF_1.decode_wif().unwrap(), ([0x11; 32], false));
         assert_eq!(WIF_L.decode_wif().unwrap(), ([0x69; 32], false));
-        assert_eq!(
-            [WIF_L, "a"].concat().decode_wif().unwrap_err(), Error::WifKey
-        );
-        assert_eq!(
-            WIC_L.replace("dgbg", "dgdg").decode_wif().unwrap_err(),
-            Error::Check
-        );
-        assert_eq!(
-            ["a"; 51].concat().decode_wif().unwrap_err(),
-            Error::WifKey
-        );
-        assert_eq!(
-            ["a"; 52].concat().decode_wif().unwrap_err(),
-            Error::WifKey
-        );
+        assert_eq!([WIF_L, "a"].concat().decode_wif().unwrap_err(), Error::WifKey);
+        assert_eq!(WIC_L.replace("dgbg", "dgdg").decode_wif().unwrap_err(), Error::Check);
+        assert_eq!(["a"; 51].concat().decode_wif().unwrap_err(), Error::WifKey);
+        assert_eq!(["a"; 52].concat().decode_wif().unwrap_err(), Error::WifKey);
     }
 
     #[test]
@@ -695,14 +717,10 @@ mod tests {
     #[test]
     fn test_handle_arguments() {
         assert!(
-            handle_arguments(
-                init_clap().get_matches_from(vec!["", "-p", "バンドメイド"])
-            ).is_ok()
+            handle_arguments(init_clap().get_matches_from(vec!["", "-p", "バンドメイド"])).is_ok()
         );
         assert!(
-            handle_arguments(
-                init_clap().get_matches_from(vec!["", "-up", "バンドメイコ"])
-            ).is_ok()
+            handle_arguments(init_clap().get_matches_from(vec!["", "-up", "バンドメイコ"])).is_ok()
         );
         assert!(
             handle_arguments(
@@ -738,26 +756,19 @@ mod tests {
 
     #[test]
     fn test_hex_string() {
-        assert_eq!([1u8].hex_string(), String::from("01"));
-        assert_eq!([1u8; 3].hex_string(), String::from("010101"));
+        assert_eq!([0xba, 0xba, 0xca].hex_string(), String::from("babaca"));
     }
 
     #[test]
     fn test_init_clap() {
-        assert!(
-            init_clap().get_matches_from_safe(
-                vec!["", "-p", TV_38_PASS[3]]
-            ).is_ok()
-        );
+        assert!(init_clap().get_matches_from_safe(vec!["", "-p", TV_38_PASS[3]]).is_ok());
         assert!(
             init_clap().get_matches_from_safe(
                 vec!["", TV_38_ENCRYPTED[3], "-p", TV_38_PASS[3]]
             ).is_ok()
         );
         assert!(
-            init_clap().get_matches_from_safe(
-                vec!["", TV_38_WIF[0], "-p", TV_38_PASS[0]]
-            ).is_ok()
+            init_clap().get_matches_from_safe(vec!["", TV_38_WIF[0], "-p", TV_38_PASS[0]]).is_ok()
         );
         assert!(
             init_clap().get_matches_from_safe(
@@ -773,12 +784,7 @@ mod tests {
         );
         assert!(
             init_clap().get_matches_from_safe(
-                vec![
-                    "",
-                    &TV_38_ENCRYPTED[0][..LEN_EKEY - 1],
-                    "-p",
-                    TV_38_PASS[0]
-                ]
+                vec!["", &TV_38_ENCRYPTED[0][..LEN_EKEY - 1], "-p", TV_38_PASS[0]]
             ).is_err()
         );
         assert!(

@@ -1,6 +1,6 @@
 [package]
 name = "encrypt38"
-version = "1.0.1"
+version = "1.1.0"
 authors = ["ceca69ec8e1bcad6c6d79e1dcf7214ff67766580a62b7d19a6fb094c97b4f2dc"]
 edition = "2018"
 include = [
@@ -19,7 +19,10 @@ keywords = [
 	"decryption",
 	"encryption"
 ]
-categories = ["command-line-interface"]
+categories = [
+	"command-line-interface",
+	"cryptocurrency"
+]
 license = "Apache-2.0"
 readme = "README.md"
 
