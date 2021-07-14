@@ -1,21 +1,13 @@
 /// Library of the 'encrypt38' project.
 
-use aes::Aes256;
-use aes::cipher::{
-    BlockDecrypt,
-    BlockEncrypt,
-    generic_array::GenericArray,
-    NewBlockCipher
-};
+// TODO: main documentation
+
 use bech32::ToBase32;
-use bip38::Encrypt;
+use bip38::{Encrypt, Decrypt, Generate};
 use clap::{App, Arg, ArgMatches, crate_version};
-use rand::RngCore;
 use ripemd160::Ripemd160;
-use scrypt::Params;
 use secp256k1::{Secp256k1, SecretKey, PublicKey};
 use sha2::Digest;
-use unicode_normalization::UnicodeNormalization;
 
 /// Information to user.
 const ABOUT: &str =
@@ -81,10 +73,10 @@ pub enum Error {
     Base58,
     /// Bech32 error.
     Bech32,
+    /// Error provenient of the bip38 dependency
+    Bip38(bip38::Error),
     /// Invalid checksum was found.
     Check,
-    /// Invalid result of elliptic curve multiplication.
-    EcMul,
     /// Found invalid encrypted private key.
     EncKey,
     /// Flag 'u' invalid in the context (encrypted or wif private keys).
@@ -99,17 +91,9 @@ pub enum Error {
     NbPubB,
     /// Error while parsing the arguments.
     Parser,
-    /// Found invalid passphrase.
-    Passwd,
     /// Input is not valid encrypted, hexadecimal or wif private key.
     Prvk,
-    /// Found invalid public key.
-    PubKey,
-    /// Trowed if an error occurs when using scrypt function.
-    ScryptF,
-    /// Trowed if an invalid scrypt Param is inserted.
-    ScryptP,
-    /// Invalid secret entropy found (could not generate address).
+    /// Invalid secret entropy was found (could not generate address).
     SecEnt,
     /// Invalid wif secret key.
     WifKey
@@ -159,15 +143,6 @@ trait StringManipulation {
     /// Decode a secret key encoded in base 58 returning bytes and compression.
     fn decode_wif(&self) -> Result<([u8; 32], bool), Error>;
 
-    /// Decrypt encrypted private key (non-ec).
-    fn decrypt(&self, pass: &str) -> Result<([u8; 32], bool), Error>;
-
-    /// Decrypt encrypted private key with ec multiply mode.
-    fn decrypt_ec(&self, pass: &str) -> Result<([u8; 32], bool), Error>;
-
-    /// Encrypt private key based on passphrase with ec multiply.
-    fn encrypt_ec(&self, compress: bool) -> Result<(String, Vec<u8>), Error>;
-
     /// Transform string of hexadecimal characters into a vector of bytes.
     fn hex_bytes(&self) -> Result<Vec<u8>, Error>;
 
@@ -181,30 +156,30 @@ trait StringManipulation {
     fn show_encrypt(&self, pass: &str, compress: bool) -> Result<(), Error>;
 }
 
-/// Implementation of enum Error.
-impl Error {
-    /// Error messages showed on cli.
-    pub fn message(&self) -> &'static str {
+impl core::fmt::Display for Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         match self {
-            Error::Base58 => "invalid base58 string",
-            Error::Bech32 => "invalid bech32 data",
-            Error::Check => "invalid checksum",
-            Error::EcMul => "invalid elliptic curve multiplication",
-            Error::EncKey => "invalid encrypted private key",
-            Error::FlagU => "invalid flag 'u' in this context",
-            Error::HexKey => "invalid hexadecimal private key",
-            Error::HexStr => "invalid hexadecimal string",
-            Error::InvArg => "invalid argument",
-            Error::NbPubB => "invalid number of public bytes",
-            Error::Parser => "fatal problem while parsing arguments",
-            Error::Passwd => "invalid passphrase",
-            Error::Prvk => "invalid encrypted, hexadecimal or wif private key",
-            Error::PubKey => "invalid public key",
-            Error::ScryptF => "failure on scrypt function",
-            Error::ScryptP => "invalid scrypt parameter",
-            Error::SecEnt => "invalid secret entropy",
-            Error::WifKey => "invalid wif secret key"
+            Error::Base58 => write!(f, "invalid base58 string"),
+            Error::Bech32 => write!(f, "invalid bech32 data"),
+            Error::Bip38(err) => write!(f, "{}", err),
+            Error::Check => write!(f, "invalid checksum"),
+            Error::EncKey => write!(f, "invalid encrypted private key"),
+            Error::FlagU => write!(f, "invalid flag 'u' in this context"),
+            Error::HexKey => write!(f, "invalid hexadecimal private key"),
+            Error::HexStr => write!(f, "invalid hexadecimal string"),
+            Error::InvArg => write!(f, "invalid argument"),
+            Error::NbPubB => write!(f, "invalid number of public bytes"),
+            Error::Parser => write!(f, "fatal problem while parsing arguments"),
+            Error::Prvk => write!(f, "not an encrypted, hexadecimal or wif private key"),
+            Error::SecEnt => write!(f, "invalid secret entropy"),
+            Error::WifKey => write!(f, "invalid wif secret key")
         }
+    }
+}
+
+impl From<bip38::Error> for Error {
+    fn from(error: bip38::Error) -> Self {
+        Error::Bip38(error)
     }
 }
 
@@ -337,221 +312,6 @@ impl StringManipulation for str {
     }
 
     #[inline]
-    fn decrypt(&self, pass: &str) -> Result<([u8; 32], bool), Error> {
-        let eprvk = self.decode_base58ck()?;
-        if eprvk[..2] != PRE_NON_EC { return Err(Error::EncKey); }
-        let compress = (eprvk[2] & 0x20) == 0x20;
-        let mut scrypt_key = [0x00; 64];
-
-        scrypt::scrypt(
-            pass.nfc().collect::<String>().as_bytes(), // normalization
-            &eprvk[3..7], // 16384 log2 = 14
-            &Params::new(14, 8, 8).map_err(|_| Error::ScryptP)?,
-            &mut scrypt_key
-        ).map_err(|_| Error::ScryptF)?;
-
-        let cipher = Aes256::new(GenericArray::from_slice(&scrypt_key[32..]));
-
-        let mut derived_half1 = GenericArray::clone_from_slice(&eprvk[7..23]);
-        let mut derived_half2 = GenericArray::clone_from_slice(&eprvk[23..39]);
-
-        cipher.decrypt_block(&mut derived_half1);
-        cipher.decrypt_block(&mut derived_half2);
-
-        for idx in 0..16 {
-            derived_half1[idx] ^= scrypt_key[idx];
-            derived_half2[idx] ^= scrypt_key[idx + 16];
-        }
-
-        let mut prvk = [0x00; 32];
-        prvk[..16].copy_from_slice(&derived_half1);
-        prvk[16..].copy_from_slice(&derived_half2);
-
-        let address = prvk.public(compress)?.p2wpkh()?;
-        let checksum = &address.as_bytes().hash256()[..4];
-
-        if checksum != &eprvk[3..7] { return Err(Error::Passwd) }
-
-        Ok((prvk, compress))
-    }
-
-    #[inline]
-    fn decrypt_ec(&self, pass: &str) -> Result<([u8; 32], bool), Error> {
-        let eprvk = self.decode_base58ck()?;
-        if eprvk[..2] != PRE_EC { return Err(Error::EncKey); }
-        let address_hash = &eprvk[3..7];
-        let encrypted_p1 = &eprvk[15..23];
-        let encrypted_p2 = &eprvk[23..39];
-        let flag_byte: u8 = eprvk[2];
-        let compress = (flag_byte & 0x20) == 0x20;
-        let has_lot = (flag_byte & 0x04) == 0x04;
-        let owner_entropy = &eprvk[7..15];
-        let owner_salt = &eprvk[7..15 - (flag_byte & 0x04) as usize];
-        let mut pre_factor = [0x00; 32];
-        let mut pass_factor = [0x00; 32];
-
-        scrypt::scrypt(
-            pass.nfc().collect::<String>().as_bytes(),
-            owner_salt,
-            &Params::new(14, 8, 8).map_err(|_| Error::ScryptP)?,
-            &mut pre_factor
-        ).map_err(|_| Error::ScryptF)?;
-
-        if has_lot {
-            let mut tmp: Vec<u8> = Vec::new();
-            tmp.append(&mut pre_factor.to_vec());
-            tmp.append(&mut owner_entropy.to_vec());
-            pass_factor[..].copy_from_slice(&tmp.hash256());
-        } else {
-            pass_factor = pre_factor;
-        }
-
-        let pass_point = pass_factor.public(true)?;
-        let mut seed_b_pass = [0x00; 64];
-
-        scrypt::scrypt(
-            &pass_point,
-            &eprvk[3..15], // 1024 log2 = 10
-            &Params::new(10, 1, 1).map_err(|_| Error::ScryptP)?,
-            &mut seed_b_pass
-        ).map_err(|_| Error::ScryptF)?;
-
-        let derived_half1 = &seed_b_pass[..32];
-        let derived_half2 = &seed_b_pass[32..];
-
-        let cipher = Aes256::new(GenericArray::from_slice(derived_half2));
-
-        let mut de_p2 = GenericArray::clone_from_slice(encrypted_p2);
-
-        cipher.decrypt_block(&mut de_p2);
-
-        for idx in 0..16 {
-            de_p2[idx] ^= derived_half1[idx + 16];
-        }
-
-        let seed_b_part2 = &de_p2[8..];
-
-        let mut tmp = [0x00; 16];
-        tmp[..8].copy_from_slice(encrypted_p1);
-        tmp[8..].copy_from_slice(&de_p2[..8]);
-
-        let mut de_p1 = GenericArray::clone_from_slice(&tmp);
-
-        cipher.decrypt_block(&mut de_p1);
-
-        for idx in 0..16 {
-            de_p1[idx] ^= derived_half1[idx];
-        }
-
-        let mut seed_b = [0x00; 24];
-        seed_b[..16].copy_from_slice(&de_p1);
-        seed_b[16..].copy_from_slice(seed_b_part2);
-
-        let factor_b = seed_b.hash256();
-
-        let mut prv = SecretKey::from_slice(&pass_factor)
-            .map_err(|_| Error::SecEnt)?;
-
-        prv.mul_assign(&factor_b).map_err(|_| Error::SecEnt)?;
-
-        let mut result = [0x00; 32];
-        result[..].copy_from_slice(&prv[..]);
-
-        let address = result.public(compress)?.p2wpkh()?;
-        let checksum = &address.as_bytes().hash256()[..4];
-
-        if checksum != address_hash { return Err(Error::Passwd) }
-
-        Ok((result, compress))
-    }
-
-    #[inline]
-    fn encrypt_ec(&self, compress: bool) -> Result<(String, Vec<u8>), Error> {
-        let mut owner_salt = [0x00; 8];
-        let mut pass_factor = [0x00; 32];
-        let mut seed_b = [0x00; 24];
-
-        rand::thread_rng().fill_bytes(&mut owner_salt);
-
-        scrypt::scrypt(
-            self.nfc().collect::<String>().as_bytes(),
-            &owner_salt,
-            &Params::new(14, 8, 8).map_err(|_| Error::ScryptP)?,
-            &mut pass_factor
-        ).map_err(|_| Error::ScryptF)?;
-
-        let pass_point = pass_factor.public(true)?;
-
-        let mut pass_point_mul = PublicKey::from_slice(&pass_point)
-            .map_err(|_| Error::PubKey)?;
-
-        rand::thread_rng().fill_bytes(&mut seed_b);
-
-        let factor_b = seed_b.hash256();
-
-        pass_point_mul.mul_assign(&Secp256k1::new(), &factor_b)
-            .map_err(|_| Error::EcMul)?;
-
-        let pubk: Vec<u8> = if compress {
-            pass_point_mul.serialize().to_vec()
-        } else {
-            pass_point_mul.serialize_uncompressed().to_vec()
-        };
-
-        let address = pubk.p2wpkh()?;
-        let address_hash = &address.as_bytes().hash256()[..4];
-        let mut salt = [0x00; 12];
-        let mut seed_b_pass = [0x00; 64];
-
-        salt[..4].copy_from_slice(address_hash);
-        salt[4..].copy_from_slice(&owner_salt);
-
-        scrypt::scrypt(
-            &pass_point,
-            &salt,
-            &Params::new(10, 1, 1).map_err(|_| Error::ScryptP)?,
-            &mut seed_b_pass
-        ).map_err(|_| Error::ScryptF)?;
-
-        let derived_half1 = &seed_b_pass[..32];
-        let derived_half2 = &seed_b_pass[32..];
-        let en_p1 = &mut seed_b[..16];
-
-        for idx in 0..16 {
-            en_p1[idx] ^= derived_half1[idx];
-        }
-
-        let cipher = Aes256::new(GenericArray::from_slice(derived_half2));
-        let mut encrypted_part1 = GenericArray::clone_from_slice(en_p1);
-
-        cipher.encrypt_block(&mut encrypted_part1);
-
-        let mut en_p2 = [0x00; 16];
-        en_p2[..8].copy_from_slice(&encrypted_part1[8..]);
-        en_p2[8..].copy_from_slice(&seed_b[16..]);
-
-        for idx in 0..16 {
-            en_p2[idx] ^= derived_half1[idx + 16];
-        }
-
-        let mut encrypted_part2 = GenericArray::clone_from_slice(&en_p2);
-
-        cipher.encrypt_block(&mut encrypted_part2);
-
-        let flag = if compress { 0x20 } else { 0x00 };
-
-        let mut result_bytes = [0x00; 39];
-        result_bytes[..2].copy_from_slice(&PRE_EC);
-        result_bytes[2] = flag;
-        result_bytes[3..7].copy_from_slice(address_hash);
-        result_bytes[7..15].copy_from_slice(&owner_salt);
-        result_bytes[15..23].copy_from_slice(&encrypted_part1[..8]);
-        result_bytes[23..].copy_from_slice(&encrypted_part2);
-
-        Ok((result_bytes.encode_base58ck(), pubk.to_vec()))
-    }
-
-    #[inline]
     fn hex_bytes(&self) -> Result<Vec<u8>, Error> {
         let mut out = Vec::new();
         for index in (0..self.len()).step_by(2) {
@@ -575,12 +335,12 @@ impl StringManipulation for str {
 
     #[inline]
     fn show_decrypt(&self, pass: &str, separator: &str) -> Result<(), Error> {
-        let (prvk, compress) =
-            if self.decode_base58ck()?[..2] == PRE_NON_EC {
-                self.decrypt(pass)?
-            } else if self.decode_base58ck()?[..2] == PRE_EC {
-                self.decrypt_ec(pass)?
-            } else { return Err(Error::EncKey); };
+        let decoded = self.decode_base58ck()?;
+        let (prvk, compress) = if decoded[..2] == PRE_NON_EC || decoded[..2] == PRE_EC{
+            self.decrypt(pass)?
+        } else {
+            return Err(Error::EncKey);
+        };
         let pubk = prvk.public(compress)?;
         if compress {
             let mut pubk_c = [0x00; NBBY_PUBC];
@@ -645,13 +405,13 @@ impl StringManipulation for str {
     #[inline]
     fn show_encrypt(&self, pass: &str, compress: bool) -> Result<(), Error> {
         let eprvk = if self.is_empty() {
-            pass.encrypt_ec(compress)?.0
+            pass.generate(compress).map_err(|_| Error::Prvk)?
         } else if self.is_char_boundary(1) && (PRE_WIF_C.contains(&self[..1])
             || self.starts_with(PRE_WIF_U)) {
             if self.len() == LEN_WIF_C || self.len() == LEN_WIF_U {
                 if !compress { return Err(Error::FlagU); }
                 let (prvk, compress) = self.decode_wif()?;
-                prvk.encrypt(pass, compress).unwrap() // FIXME
+                prvk.encrypt(pass, compress).map_err(|_| Error::Prvk)?
             } else {
                 return Err(Error::WifKey);
             }
@@ -659,7 +419,7 @@ impl StringManipulation for str {
             if self.len() == 64 {
                 let mut prvk = [0x00; 32];
                 prvk[..].copy_from_slice(&self.hex_bytes()?);
-                prvk.encrypt(pass, compress).unwrap() // FIXME
+                prvk.encrypt(pass, compress).map_err(|_| Error::Prvk)?
             } else {
                 return Err(Error::HexKey);
             }
@@ -726,7 +486,7 @@ fn validate_prvk(prvk: String) -> Result<(), String> {
          prvk.len() == LEN_WIF_U && prvk.starts_with(PRE_WIF_U))) {
         Ok(())
     } else {
-        Err(String::from(Error::Prvk.message()))
+        Err(Error::Prvk.to_string())
     }
 }
 
@@ -855,54 +615,6 @@ mod tests {
         "6PgGWtx25kUg8QWvwuJAgorN6k9FbE25rv5dMRwu5SKMnfpfVe5mar2ngH"
     ];
 
-    /// Resulting keys obtained in test vectors of bip-0038.
-    const TV_38_KEY: [[u8; 32]; 9] = [
-    [
-        0xcb, 0xf4, 0xb9, 0xf7, 0x04, 0x70, 0x85, 0x6b, 0xb4, 0xf4, 0x0f, 0x80,
-        0xb8, 0x7e, 0xdb, 0x90, 0x86, 0x59, 0x97, 0xff, 0xee, 0x6d, 0xf3, 0x15,
-        0xab, 0x16, 0x6d, 0x71, 0x3a, 0xf4, 0x33, 0xa5
-    ],
-    [
-        0x09, 0xc2, 0x68, 0x68, 0x80, 0x09, 0x5b, 0x1a, 0x4c, 0x24, 0x9e, 0xe3,
-        0xac, 0x4e, 0xea, 0x8a, 0x01, 0x4f, 0x11, 0xe6, 0xf9, 0x86, 0xd0, 0xb5,
-        0x02, 0x5a, 0xc1, 0xf3, 0x9a, 0xfb, 0xd9, 0xae
-    ],
-    [
-        0x64, 0xee, 0xab, 0x5f, 0x9b, 0xe2, 0xa0, 0x1a, 0x83, 0x65, 0xa5, 0x79,
-        0x51, 0x1e, 0xb3, 0x37, 0x3c, 0x87, 0xc4, 0x0d, 0xa6, 0xd2, 0xa2, 0x5f,
-        0x05, 0xbd, 0xa6, 0x8f, 0xe0, 0x77, 0xb6, 0x6e
-    ],
-    [
-        0xcb, 0xf4, 0xb9, 0xf7, 0x04, 0x70, 0x85, 0x6b, 0xb4, 0xf4, 0x0f, 0x80,
-        0xb8, 0x7e, 0xdb, 0x90, 0x86, 0x59, 0x97, 0xff, 0xee, 0x6d, 0xf3, 0x15,
-        0xab, 0x16, 0x6d, 0x71, 0x3a, 0xf4, 0x33, 0xa5
-    ],
-    [
-        0x09, 0xc2, 0x68, 0x68, 0x80, 0x09, 0x5b, 0x1a, 0x4c, 0x24, 0x9e, 0xe3,
-        0xac, 0x4e, 0xea, 0x8a, 0x01, 0x4f, 0x11, 0xe6, 0xf9, 0x86, 0xd0, 0xb5,
-        0x02, 0x5a, 0xc1, 0xf3, 0x9a, 0xfb, 0xd9, 0xae
-    ],
-    [
-        0xa4, 0x3a, 0x94, 0x05, 0x77, 0xf4, 0xe9, 0x7f, 0x5c, 0x4d, 0x39, 0xeb,
-        0x14, 0xff, 0x08, 0x3a, 0x98, 0x18, 0x7c, 0x64, 0xea, 0x7c, 0x99, 0xef,
-        0x7c, 0xe4, 0x60, 0x83, 0x39, 0x59, 0xa5, 0x19
-    ],
-    [
-        0xc2, 0xc8, 0x03, 0x6d, 0xf2, 0x68, 0xf4, 0x98, 0x09, 0x93, 0x50, 0x71,
-        0x8c, 0x4a, 0x3e, 0xf3, 0x98, 0x4d, 0x2b, 0xe8, 0x46, 0x18, 0xc2, 0x65,
-        0x0f, 0x51, 0x71, 0xdc, 0xc5, 0xeb, 0x66, 0x0a
-    ],
-    [
-        0x44, 0xea, 0x95, 0xaf, 0xbf, 0x13, 0x83, 0x56, 0xa0, 0x5e, 0xa3, 0x21,
-        0x10, 0xdf, 0xd6, 0x27, 0x23, 0x2d, 0x0f, 0x29, 0x91, 0xad, 0x22, 0x11,
-        0x87, 0xbe, 0x35, 0x6f, 0x19, 0xfa, 0x81, 0x90
-    ],
-    [
-        0xca, 0x27, 0x59, 0xaa, 0x4a, 0xdb, 0x0f, 0x96, 0xc4, 0x14, 0xf3, 0x6a,
-        0xbe, 0xb8, 0xdb, 0x59, 0x34, 0x29, 0x85, 0xbe, 0x9f, 0xa5, 0x0f, 0xaa,
-        0xc2, 0x28, 0xc8, 0xe7, 0xd9, 0x0e, 0x30, 0x06
-    ]];
-
     /// Passphrases acquired on test vectors of bip-0038.
     const TV_38_PASS: [&str; 9] = [
         "TestingOneTwoThree", "Satoshi",
@@ -971,61 +683,16 @@ mod tests {
     }
 
     #[test]
-    fn test_decrypt() {
-        let mut compress = false;
-        for (idx, ekey) in TV_38_ENCRYPTED[..5].iter().enumerate() {
-            if idx > 2 { compress = true }
-            assert_eq!(
-                ekey.decrypt(TV_38_PASS[idx]).unwrap(),
-                (TV_38_KEY[idx], compress)
-            );
-        }
-        assert_eq!(
-            TV_38_ENCRYPTED[0].decrypt("wrong").unwrap_err(), Error::Passwd
-        );
-    }
-
-    #[test]
-    fn test_decrypt_ec() {
-        for (idx, ekey) in TV_38_ENCRYPTED[5..].iter().enumerate() {
-            assert_eq!(
-                ekey.decrypt_ec(TV_38_PASS[idx + 5]).unwrap(),
-                (TV_38_KEY[idx + 5], false)
-            );
-        }
-        assert_eq!(
-            TV_38_ENCRYPTED[5].decrypt_ec("wrong").unwrap_err(), Error::Passwd
-        );
-    }
-
-    #[test]
     fn test_encode_base58ck() {
         assert_eq!("a".as_bytes().encode_base58ck(), "C2dGTwc");
         assert_eq!("abc".as_bytes().encode_base58ck(), "4h3c6RH52R");
     }
 
     #[test]
-    fn test_encrypt() {
-        let mut compress = false;
-        for (idx, key) in TV_38_KEY[..5].iter().enumerate() {
-            if idx > 2 { compress = true }
-            assert_eq!(key.encrypt(TV_38_PASS[idx], compress).unwrap(), TV_38_ENCRYPTED[idx]);
-        }
-    }
-
-    #[test]
-    fn test_encrypt_ec() {
-        assert!(
-            "バンドメイド".encrypt_ec(true).unwrap().0
-            .decrypt_ec("バンドメイド").is_ok()
-        );
-    }
-
-    #[test]
     fn test_handle_arguments() {
         assert!(
             handle_arguments(
-                init_clap().get_matches_from(vec!["", "-p", "バンドメイコ"])
+                init_clap().get_matches_from(vec!["", "-p", "バンドメイド"])
             ).is_ok()
         );
         assert!(
