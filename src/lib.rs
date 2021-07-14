@@ -164,7 +164,7 @@ impl core::fmt::Display for Error {
             Error::Bip38(err) => write!(f, "{}", err),
             Error::Check => write!(f, "invalid checksum"),
             Error::EncKey => write!(f, "invalid encrypted private key"),
-            Error::FlagU => write!(f, "invalid flag 'u' in this context"),
+            Error::FlagU => write!(f, "invalid flag '\x1b[33mu\x1b[m' in this context (aborted)"),
             Error::HexKey => write!(f, "invalid hexadecimal private key"),
             Error::HexStr => write!(f, "invalid hexadecimal string"),
             Error::InvArg => write!(f, "invalid argument"),
@@ -178,8 +178,8 @@ impl core::fmt::Display for Error {
 }
 
 impl From<bip38::Error> for Error {
-    fn from(error: bip38::Error) -> Self {
-        Error::Bip38(error)
+    fn from(err: bip38::Error) -> Self {
+        Error::Bip38(err)
     }
 }
 
@@ -411,7 +411,7 @@ impl StringManipulation for str {
             if self.len() == LEN_WIF_C || self.len() == LEN_WIF_U {
                 if !compress { return Err(Error::FlagU); }
                 let (prvk, compress) = self.decode_wif()?;
-                prvk.encrypt(pass, compress).map_err(|_| Error::Prvk)?
+                prvk.encrypt(pass, compress)?
             } else {
                 return Err(Error::WifKey);
             }
@@ -419,7 +419,7 @@ impl StringManipulation for str {
             if self.len() == 64 {
                 let mut prvk = [0x00; 32];
                 prvk[..].copy_from_slice(&self.hex_bytes()?);
-                prvk.encrypt(pass, compress).map_err(|_| Error::Prvk)?
+                prvk.encrypt(pass, compress)?
             } else {
                 return Err(Error::HexKey);
             }
@@ -443,7 +443,11 @@ pub fn handle_arguments(matches: ArgMatches) -> Result<(), Error> {
     } else if prv.starts_with(PRE_EKEY) {
         prv.show_decrypt(pass, separator)?;
     } else {
-        if separator != SEP_DEFAULT { return Err(Error::FlagU); } // FIXME
+        if separator != SEP_DEFAULT {
+            eprintln!(
+                "\x1b[33m\x1b[1mwarning\x1b[m: optional separator invalid in this context (ignored)"
+            );
+        }
         prv.show_encrypt(pass, compress)?;
     }
     Ok(())
