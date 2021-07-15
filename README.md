@@ -65,7 +65,7 @@ compatibility, *not recommended*).
 ## Help
 
 ```bash
-encrypt38 1.1.1
+encrypt38 1.1.2
 Insert encrypted, hexadecimal or wif private key and passphrase to decrypt or
 encrypt accordingly. Insert only passphrase to create an encrypted private key
 using elliptic curve multiplication (and pseudo-random number generation).
