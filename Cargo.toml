@@ -21,7 +21,7 @@ keywords = [
 ]
 categories = [
 	"command-line-interface",
-	"cryptocurrencies"
+	"cryptography::cryptocurrencies"
 ]
 license = "Apache-2.0"
 readme = "README.md"
