@@ -27,14 +27,10 @@ license = "Apache-2.0"
 readme = "README.md"
 
 [dependencies]
-aes = "0.7.4"
 bech32 = "0.8.1"
 bip38 = "1.0.0"
 bs58 = "0.4.0"
 clap = "2.33.3"
-rand = "0.8.4"
 ripemd160 = "0.9.1"
-scrypt = { version = "0.7.0", default-features = false }
 secp256k1 = "0.20.3"
 sha2 = "0.9.5"
-unicode-normalization = "0.1.19"
