@@ -1,21 +1,21 @@
 //! **Command line tool to encrypt and decrypt bitcoin private keys with
 //! [bip-0038](https://github.com/bitcoin/bips/blob/master/bip-0038.mediawiki) standard.**
-//! 
+//!
 //! ## Basic usage
 //!
 //! ```console
-//! $ encrypt38 KwYgW8gcxj1JWJXhPSu4Fqwzfhp5Yfi42mdYmMa4XqK7NJxXUSK7 -p Satoshi
+//! $ encrypt38 -p Satoshi KwYgW8gcxj1JWJXhPSu4Fqwzfhp5Yfi42mdYmMa4XqK7NJxXUSK7
 //! 6PYLtMnXvfG3oJde97zRyLYFZCYizPU5T3LwgdYJz1fRhh16bU7u6PPmY7
 //! ```
 //!
 //! ```console
-//! $ encrypt38 6PYLtMnXvfG3oJde97zRyLYFZCYizPU5T3LwgdYJz1fRhh16bU7u6PPmY7 -p Satoshi
+//! $ encrypt38 -p Satoshi 6PYLtMnXvfG3oJde97zRyLYFZCYizPU5T3LwgdYJz1fRhh16bU7u6PPmY7
 //! 09c2686880095b1a4c249ee3ac4eea8a014f11e6f986d0b5025ac1f39afbd9ae
 //! KwYgW8gcxj1JWJXhPSu4Fqwzfhp5Yfi42mdYmMa4XqK7NJxXUSK7
 //! ```
 //!
 //! ## Disclaimer
-//! 
+//!
 //! * **Don't trust, verify**
 //!
 //!     Compare the results of this tool with others. Verify the implementation (and the tests).
@@ -28,13 +28,8 @@
 //! encrypted with bip-0038 standard is [not recommended](https://youtu.be/MbwLVok4gWA?t=2462)
 //! anymore (use [mnemonic](https://crates.io/crates/mnemonic39) instead).
 //!
-//! * **Pseudo-random number generation**
-//!
-//!     This tool use pseudo-random generation ([rand](https://crates.io/crates/rand)) when
-//! encrypting using elliptic curve multiplication method (as specified in bip-0038).
-//! 
 //! ## Features
-//! 
+//!
 //! * **Address**
 //!
 //!     This tool show the respective address of a decrypted private key in the legacy,
@@ -64,16 +59,39 @@
 //!
 //!     This tool is capable of resulting in uncompressed address (mainly for decryption and retro
 //! compatibility, *not recommended*).
-//! 
+//!
+//! ## Help
+//!
+//! ```bash
+//! encrypt38 1.1.1
+//! Insert encrypted, hexadecimal or wif private key and passphrase to decrypt or
+//! encrypt accordingly. Insert only passphrase to create an encrypted private key
+//! using elliptic curve multiplication (and pseudo-random number generation).
+//!
+//! USAGE:
+//!     encrypt38 [FLAGS] [OPTIONS] -p <passphrase> [PRIVATE_KEY]
+//!
+//! FLAGS:
+//!     -h, --help            Prints help information
+//!     -u, --uncompressed    Encrypted private key to generate uncompressed address
+//!     -V, --version         Prints version information
+//!     -v, --verbose         Show possible address and public key when decrypting
+//!
+//! OPTIONS:
+//!     -p <passphrase>        Used to encrypt and decrypt the private key (required)
+//!     -s <separator>         Specify character (or string) to separate verbose result
+//!
+//! ARGS:
+//!     <PRIVATE_KEY>    Hexadecimal, wif or encrypted private key
+//! ```
+//!
 //! ## Recommendation
-//! 
+//!
 //! * **Build and test**
 //!
 //!     Always use the flag `--release` in `cargo` even for running tests. The encryption algorithm
 //! is intended to be heavy on cpu so, without the optimizations of a release build, running the
 //! tests will be a slow process. With `--release` all tests are done in seconds.
-
-// TODO: usage examples
 
 use bech32::ToBase32;
 use bip38::{Encrypt, Decrypt, Generate};
@@ -138,6 +156,9 @@ const PRE_WIF_U: &str = "5";
 
 /// Default string used to separate resulting information.
 const SEP_DEFAULT: &str = " | ";
+
+/// Prefix of all warning output messages;
+const WARN: &str = "\x1b[33m\x1b[1mwarning\x1b[m: ";
 
 /// Errors of 'encrypt38' project.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd)]
@@ -224,7 +245,7 @@ trait StringManipulation {
     fn is_hex(&self) -> bool;
 
     /// Show decryption of target string in command line interface.
-    fn show_decrypt(&self, pass: &str, separator: &str) -> Result<(), Error>;
+    fn show_decrypt(&self, pass: &str, separator: &str, verbose: bool) -> Result<(), Error>;
 
     /// Show encryption of target string in command line interface.
     fn show_encrypt(&self, pass: &str, compress: bool) -> Result<(), Error>;
@@ -238,7 +259,8 @@ impl core::fmt::Display for Error {
             Error::Bip38(err) => write!(f, "{}", err),
             Error::Check => write!(f, "invalid checksum"),
             Error::EncKey => write!(f, "invalid encrypted private key"),
-            Error::FlagU => write!(f, "invalid flag '\x1b[33mu\x1b[m' in this context (aborted)"),
+            Error::FlagU =>
+                write!(f, "flag '\x1b[33muncompressed\x1b[m' invalid in this context (aborted)"),
             Error::HexKey => write!(f, "invalid hexadecimal private key"),
             Error::HexStr => write!(f, "invalid hexadecimal string"),
             Error::InvArg => write!(f, "invalid argument"),
@@ -392,70 +414,77 @@ impl StringManipulation for str {
     }
 
     #[inline]
-    fn show_decrypt(&self, pass: &str, separator: &str) -> Result<(), Error> {
+    fn show_decrypt(&self, pass: &str, separator: &str, verbose: bool) -> Result<(), Error> {
         let decoded = self.decode_base58ck()?;
         let (prvk, compress) = if decoded[..2] == PRE_NON_EC || decoded[..2] == PRE_EC {
             self.decrypt(pass)?
         } else {
             return Err(Error::EncKey);
         };
-        let pubk = prvk.public(compress)?;
-        if compress {
-            let mut pubk_c = [0x00; NBBY_PUBC];
-            pubk_c[..].copy_from_slice(&pubk);
-            let pubk_hex = pubk_c.hex_string();
-            let wif = prvk.wif(compress);
-            if separator == SEP_DEFAULT {
-                println!(
-                    "{}\n{:42}{}{}{}{}\n{:42}{}{}{}{}\n{}{}{}{}{}",
-                    prvk.hex_string(),
-                    pubk_c.p2wpkh()?,
-                    separator,
-                    pubk_hex,
-                    separator,
-                    wif,
-                    pubk_c.segwit_p2wpkh_p2sh()?,
-                    separator,
-                    pubk_hex,
-                    separator,
-                    wif,
-                    pubk_c.segwit_p2wpkh()?,
-                    separator,
-                    pubk_hex,
-                    separator,
-                    wif,
-                );
+
+        let prvk_hex = prvk.hex_string();
+        let wif = prvk.wif(compress);
+        
+        if verbose {
+            let pubk = prvk.public(compress)?;
+            if compress {
+                let mut pubk_c = [0x00; NBBY_PUBC];
+                pubk_c[..].copy_from_slice(&pubk);
+                let pubk_hex = pubk_c.hex_string();
+                if separator == SEP_DEFAULT {
+                    println!(
+                        "{}\n{:42}{}{}{}{}\n{:42}{}{}{}{}\n{}{}{}{}{}",
+                        prvk_hex,
+                        pubk_c.p2wpkh()?,
+                        separator,
+                        pubk_hex,
+                        separator,
+                        wif,
+                        pubk_c.segwit_p2wpkh_p2sh()?,
+                        separator,
+                        pubk_hex,
+                        separator,
+                        wif,
+                        pubk_c.segwit_p2wpkh()?,
+                        separator,
+                        pubk_hex,
+                        separator,
+                        wif,
+                    );
+                } else {
+                    println!(
+                        "{}\n{}{}{}{}{}\n{}{}{}{}{}\n{}{}{}{}{}",
+                        prvk_hex,
+                        pubk_c.p2wpkh()?,
+                        separator,
+                        pubk_hex,
+                        separator,
+                        wif,
+                        pubk_c.segwit_p2wpkh_p2sh()?,
+                        separator,
+                        pubk_hex,
+                        separator,
+                        wif,
+                        pubk_c.segwit_p2wpkh()?,
+                        separator,
+                        pubk_hex,
+                        separator,
+                        wif,
+                    );
+                }
             } else {
                 println!(
-                    "{}\n{}{}{}{}{}\n{}{}{}{}{}\n{}{}{}{}{}",
-                    prvk.hex_string(),
-                    pubk_c.p2wpkh()?,
+                    "{}\n{}{}{}{}{}",
+                    prvk_hex,
+                    pubk.p2wpkh()?,
                     separator,
-                    pubk_hex,
+                    pubk.hex_string(),
                     separator,
-                    wif,
-                    pubk_c.segwit_p2wpkh_p2sh()?,
-                    separator,
-                    pubk_hex,
-                    separator,
-                    wif,
-                    pubk_c.segwit_p2wpkh()?,
-                    separator,
-                    pubk_hex,
-                    separator,
-                    wif,
+                    wif
                 );
             }
         } else {
-            println!(
-                "{}\n{}{}{}{}{}",
-                prvk.hex_string(),
-                pubk.p2wpkh()?,
-                separator,
-                pubk.hex_string(),
-                separator,
-                prvk.wif(compress)
-            );
+            println!("{}\n{}", prvk_hex, wif);
         }
         Ok(())
     }
@@ -499,13 +528,17 @@ pub fn handle_arguments(matches: ArgMatches) -> Result<(), Error> {
 
     if !compress && prv.starts_with(PRE_EKEY) {
         return Err(Error::FlagU);
-    } else if prv.starts_with(PRE_EKEY) {
-        prv.show_decrypt(pass, separator)?;
+    } else if prv.len() == LEN_EKEY && prv.starts_with(PRE_EKEY) {
+        prv.show_decrypt(pass, separator, matches.is_present("verbose"))?;
     } else {
-        if separator != SEP_DEFAULT {
-            eprintln!(
-                "\x1b[33m\x1b[1mwarning\x1b[m: optional separator invalid in this context (ignored)"
-            );
+        if matches.is_present("verbose") {
+            eprintln!("{}flag '\x1b[33mverbose\x1b[m' invalid in this context (ignored)", WARN );
+
+            if separator != SEP_DEFAULT {
+                eprintln!(
+                    "{}option '\x1b[33mseparator\x1b[m' invalid in this context (ignored)", WARN
+                );
+            }
         }
         prv.show_encrypt(pass, compress)?;
     }
@@ -518,8 +551,14 @@ pub fn init_clap() -> App<'static, 'static> {
     App::new("encrypt38")
         .about(ABOUT)
         .arg(
+            Arg::with_name("PRIVATE_KEY")
+                .help("Hexadecimal, wif or encrypted private key")
+                .takes_value(true)
+                .validator(validate_prvk)
+        ).arg(
             Arg::with_name("separator")
-                .help("Use specific character (or string) to separate results")
+                .help("Specify character (or string) to separate verbose result")
+                .requires("verbose")
                 .short("s")
                 .takes_value(true)
         ).arg(
@@ -529,16 +568,16 @@ pub fn init_clap() -> App<'static, 'static> {
                 .short("p")
                 .takes_value(true)
         ).arg(
-            Arg::with_name("PRIVATE_KEY")
-                .help("Hexadecimal, wif or encrypted private key")
-                .takes_value(true)
-                .validator(validate_prvk)
-        ).arg(
             Arg::with_name("uncompressed")
                 .help("Encrypted private key to generate uncompressed address")
                 .long("uncompressed")
                 .short("u")
                 .takes_value(false)
+        ).arg(
+            Arg::with_name("verbose")
+                .help("Show possible address and public key when decrypting")
+                .long("verbose")
+                .short("v")
         ).version(crate_version!())
 }
 
@@ -750,7 +789,7 @@ mod tests {
             handle_arguments(init_clap().get_matches_from(vec!["", "-p", "バンドメイド"])).is_ok()
         );
         assert!(
-            handle_arguments(init_clap().get_matches_from(vec!["", "-up", "バンドメイコ"])).is_ok()
+            handle_arguments(init_clap().get_matches_from(vec!["", "-up", "くるっぽー！"])).is_ok()
         );
         assert!(
             handle_arguments(
@@ -885,17 +924,12 @@ mod tests {
 
     #[test]
     fn test_show_decrypt() {
-        assert!(
-            TV_38_ENCRYPTED[0].show_decrypt(TV_38_PASS[0], SEP_DEFAULT).is_ok()
-        );
+        assert!(TV_38_ENCRYPTED[0].show_decrypt(TV_38_PASS[0], SEP_DEFAULT, true).is_ok());
     }
 
     #[test]
     fn test_show_encrypt() {
-        assert_eq!(
-            TV_38_WIF[0].show_encrypt("pass", false).unwrap_err(),
-            Error::FlagU
-        );
+        assert_eq!(TV_38_WIF[0].show_encrypt("pass", false).unwrap_err(), Error::FlagU);
         assert!(TV_38_WIF[1].show_encrypt("pass", true).is_ok());
     }
 
@@ -922,14 +956,10 @@ mod tests {
             assert!(validate_prvk(String::from(&eprvk[1..])).is_err());
         }
         for eprvk in &TV_38_ENCRYPTED {
-            assert!(
-                validate_prvk(String::from(&eprvk[..LEN_EKEY - 1])).is_err()
-            );
+            assert!(validate_prvk(String::from(&eprvk[..LEN_EKEY - 1])).is_err());
         }
         for eprvk in &TV_38_ENCRYPTED {
-            assert!(
-                validate_prvk(String::from([eprvk, "3"].concat())).is_err()
-            );
+            assert!( validate_prvk(String::from([eprvk, "3"].concat())).is_err());
         }
         assert!(validate_prvk(String::from("everything else")).is_err());
     }
