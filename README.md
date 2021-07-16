@@ -65,7 +65,7 @@ compatibility, *not recommended*).
 ## Help
 
 ```bash
-encrypt38 1.1.2
+encrypt38 1.1.3
 Insert encrypted, hexadecimal or wif private key and passphrase to decrypt or
 encrypt accordingly. Insert only passphrase to create an encrypted private key
 using elliptic curve multiplication (and pseudo-random number generation).
@@ -86,11 +86,3 @@ OPTIONS:
 ARGS:
     <PRIVATE_KEY>    Hexadecimal, wif or encrypted private key
 ```
-
-## Recommendation
-
-* **Build and test**
-
-    Always use the flag `--release` in `cargo` even for running tests. The encryption algorithm is 
-intended to be heavy on cpu so, without the optimizations of a release build, running the tests 
-will be a slow process. With `--release` all tests are done in seconds.
