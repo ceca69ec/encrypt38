@@ -312,6 +312,30 @@ impl BytesManipulation for [u8] {
     }
 }
 
+/// Implementation of enum Error.
+impl Error {
+    /// Retrieve the status code to be showed when exiting because of an error.
+    #[doc(hidden)]
+    pub fn status(&self) -> i32 {
+        match self {
+            Error::Base58 => 1,
+            Error::Bech32 => 2,
+            Error::Bip38(_) => 3,
+            Error::Check => 4,
+            Error::EncKey => 5,
+            Error::FlagU => 6,
+            Error::HexKey => 7,
+            Error::HexStr => 8,
+            Error::InvArg => 9,
+            Error::NbPubB => 10,
+            Error::Parser => 11,
+            Error::Prvk => 12,
+            Error::SecEnt => 13,
+            Error::WifKey => 14
+        }
+    }
+}
+
 /// Implementation of trait PrivateKeyManipulation.
 impl PrivateKeyManipulation for [u8; 32] {
     #[inline]
@@ -416,7 +440,7 @@ impl StringManipulation for str {
 
         let prvk_hex = prvk.hex_string();
         let wif = prvk.wif(compress);
-        
+
         if verbose {
             let pubk = prvk.public(compress)?;
             if compress {
