@@ -65,7 +65,7 @@ compatibility, *not recommended*).
 ## Help
 
 ```shell
-encrypt38 1.1.4
+encrypt38 1.1.5
 Insert encrypted, hexadecimal or wif private key and passphrase to decrypt or
 encrypt accordingly. Insert only passphrase to create an encrypted private key
 using elliptic curve multiplication (and pseudo-random number generation).
