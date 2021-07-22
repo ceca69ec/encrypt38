@@ -21,22 +21,23 @@ KwYgW8gcxj1JWJXhPSu4Fqwzfhp5Yfi42mdYmMa4XqK7NJxXUSK7
 
 * **Don't trust, verify**
 
-    Compare the results of this tool with others. Verify the implementation (and the tests). Decrypt
- immediately after an encryption to check the passphrase you *typed* was the one you *wanted*. 
+    Compare the results of this tool with others. Verify the implementation (and the tests).
+ Decrypt immediately after an encryption to check the passphrase you *typed* was the one you
+ *wanted*.
 **Use at your won risk.**
 
 * **Not recommended**
 
-    Use this tool only to decrypt keys you already have. The method of keeping private keys 
-encrypted with bip-0038 standard is [not recommended](https://youtu.be/MbwLVok4gWA?t=2462) anymore 
-(use [mnemonic](https://crates.io/crates/mnemonic39) instead).
+    Use this tool only to decrypt keys you already have. The method of keeping private keys
+ encrypted with bip-0038 standard is [not recommended](https://youtu.be/MbwLVok4gWA?t=2462) anymore
+ (use [mnemonic](https://crates.io/crates/mnemonic39) instead).
 
 ## Features
 
 * **Address**
 
-    This tool show the respective address of a decrypted private key in the legacy, segwit-nested 
-and segwit-native formats according to the version prefix of the encrypted private key.
+    This tool show the respective address of a decrypted private key in the legacy, segwit-nested
+ and segwit-native formats according to the version prefix of the encrypted private key.
 
 * **Custom separator**
 
@@ -44,13 +45,13 @@ and segwit-native formats according to the version prefix of the encrypted priva
 
 * **Decryption**
 
-    Insert an encrypted private key `6P...` and passphrase do show the private key represented in 
-hexadecimal and the respective address, public key and wif keys.
+    Insert an encrypted private key `6P...` and passphrase do show the private key represented in
+ hexadecimal and the respective address, public key and wif keys.
 
 * **Encryption**
 
-    Insert a private key in the form of hexadecimal numbers or wif key and passphrase to show the 
-encrypted private key.
+    Insert a private key in the form of hexadecimal numbers or wif key and passphrase to show the
+ encrypted private key.
 
 * **Generation (elliptic curve multiplication method)**
 
@@ -59,13 +60,13 @@ encrypted private key.
 
 * **Uncompressed address**
 
-    This tool is capable of resulting in uncompressed address (mainly for decryption and retro 
-compatibility, *not recommended*).
+    This tool is capable of resulting in uncompressed address (mainly for decryption and retro
+ compatibility, *not recommended*).
 
 ## Help
 
 ```shell
-encrypt38 1.1.5
+encrypt38 1.1.6
 Insert encrypted, hexadecimal or wif private key and passphrase to decrypt or
 encrypt accordingly. Insert only passphrase to create an encrypted private key
 using elliptic curve multiplication (and pseudo-random number generation).
@@ -85,4 +86,13 @@ OPTIONS:
 
 ARGS:
     <PRIVATE_KEY>    Hexadecimal, wif or encrypted private key
+```
+
+## Installation
+
+You have to install [rust](https://www.rust-lang.org/tools/install) and a
+ [liker](https://gcc.gnu.org/wiki/InstallingGCC) if you don't already have them.
+
+```shell
+$ cargo install encrypt38
 ```

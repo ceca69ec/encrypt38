@@ -63,7 +63,7 @@
 //! ## Help
 //!
 //! ```shell
-//! encrypt38 1.1.5
+//! encrypt38 1.1.6
 //! Insert encrypted, hexadecimal or wif private key and passphrase to decrypt or
 //! encrypt accordingly. Insert only passphrase to create an encrypted private key
 //! using elliptic curve multiplication (and pseudo-random number generation).
@@ -83,6 +83,15 @@
 //!
 //! ARGS:
 //!     <PRIVATE_KEY>    Hexadecimal, wif or encrypted private key
+//! ```
+//!
+//! ## Installation
+//!
+//! You have to install [rust](https://www.rust-lang.org/tools/install) and a
+//!  [liker](https://gcc.gnu.org/wiki/InstallingGCC) if you don't already have them.
+//!
+//! ```shell
+//! $ cargo install encrypt38
 //! ```
 
 use bech32::ToBase32;
