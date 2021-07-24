@@ -753,7 +753,7 @@ mod tests {
         "ΜΟΛΩΝ ΛΑΒΕ"
     ];
 
-    /// First resulting wif key obtained in test vector of bip-0038.
+    /// Wif private keys from bip-0038 test vectors.
     const TV_38_WIF: [&str; 9] = [
         "5KN7MzqK5wt2TP1fQCYyHBtDrXdJuXbUzm4A9rKAteGu3Qi5CVR",
         "5HtasZ6ofTHP6HCwTqTkLDuLQisYPah7aUnSKfC7h4hMUVw2gi5",
