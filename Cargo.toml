@@ -27,7 +27,7 @@ readme = "README.md"
 
 [dependencies]
 bech32 = "0.8.1"
-bip38 = "1.0.2"
+bip38 = "1.1.0"
 bs58 = "0.4.0"
 clap = "2.33.3"
 ripemd160 = "0.9.1"
