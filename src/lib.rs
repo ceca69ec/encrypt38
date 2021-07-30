@@ -549,7 +549,7 @@ pub fn handle_arguments(matches: ArgMatches) -> Result<(), Error> {
     let compress = !matches.is_present("uncompressed");
     let separator = matches.value_of("separator").unwrap_or(SEP_DEFAULT);
     let pass = matches.value_of("passphrase").ok_or(Error::Parser)?;
-    let prv = matches.value_of("PRIVATE_KEY").unwrap_or(""); // not required
+    let prv = matches.value_of("PRIVATE_KEY").unwrap_or_default(); // not required
 
     if !compress && prv.starts_with(PRE_EKEY) {
         return Err(Error::FlagU);
