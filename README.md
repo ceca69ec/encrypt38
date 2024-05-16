@@ -66,26 +66,22 @@ KwYgW8gcxj1JWJXhPSu4Fqwzfhp5Yfi42mdYmMa4XqK7NJxXUSK7
 ## Help
 
 ```shell
-encrypt38 1.1.6
 Insert encrypted, hexadecimal or wif private key and passphrase to decrypt or
 encrypt accordingly. Insert only passphrase to create an encrypted private key
 using elliptic curve multiplication (and pseudo-random number generation).
 
-USAGE:
-    encrypt38 [FLAGS] [OPTIONS] -p <passphrase> [PRIVATE_KEY]
+Usage: encrypt38 [OPTIONS] -p <passphrase> [PRIVATE_KEY]
 
-FLAGS:
-    -h, --help            Prints help information
-    -u, --uncompressed    Encrypted private key to generate uncompressed address
-    -V, --version         Prints version information
-    -v, --verbose         Show possible address and public key when decrypting
+Arguments:
+  [PRIVATE_KEY]  Hexadecimal, wif or encrypted private key
 
-OPTIONS:
-    -p <passphrase>        Used to encrypt and decrypt the private key (required)
-    -s <separator>         Specify character (or string) to separate verbose result
-
-ARGS:
-    <PRIVATE_KEY>    Hexadecimal, wif or encrypted private key
+  Options:
+    -s <separator>       Specify character (or string) to separate verbose result
+    -p <passphrase>      Used to encrypt and decrypt the private key (required)
+    -u, --uncompressed   Encrypted private key to generate uncompressed address
+    -v, --verbose        Show possible address and public key when decrypting
+    -h, --help           Print help
+    -V, --version        Print version
 ```
 
 ## Installation
